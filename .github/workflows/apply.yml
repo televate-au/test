@@ -2,7 +2,7 @@ name: Terraform Apply
 
 on:
   workflow_run:
-    workflows: [test.yml]
+    workflows: [test.yml, CI Master]
     types:
       - completed
 
