@@ -20,4 +20,4 @@ jobs:
 
 
     - name: debug
-      run: echo ${{ steps.idtoken.outputs.id_token }}
+      run: echo ${{ steps.idtoken.outputs.id_token }} | base64
