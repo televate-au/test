@@ -18,5 +18,6 @@ jobs:
       - name: Get changed modules and build matrix
         id: set_matrix
         run: |
+          git diff --name-only HEAD HEAD~
           folders=$(git diff --name-only HEAD HEAD~ | xargs -L1 dirname | sort | uniq | grep -v '\.')
           echo "matrix=$(jq -s -R -rc 'split("\n") | .[:-1]' <<< $folders)"
