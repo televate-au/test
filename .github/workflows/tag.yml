@@ -31,6 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Get tag from file
+      - name: Get version from file
+        id: version
         run: |
-          echo ${{ matrix.folder }}
+          echo "version=$(head -n1 ${{ matrix.folder }}/.version)" >> $GITHUB_OUTPUT
+
+      - uses: rickstaa/action-create-tag@v1
+        with:
+          tag: ${{ matrix.folder }}-${{ steps.version.outputs.version }}
