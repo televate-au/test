@@ -1,12 +1,14 @@
 on:
-  pull_request:
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions: write-all
 
 
 jobs:
-  terraform_plan:
+  terraform_apply:
     runs-on: ubuntu-latest
     steps:
     - name: Dump GitHub context
