@@ -7,7 +7,7 @@ permissions: write-all
 
 jobs:
   job:
-    environment: dev
+    # environment: dev
     runs-on: ubuntu-latest
     steps:
     - name: Dump GitHub context
