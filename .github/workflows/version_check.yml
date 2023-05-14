@@ -1,0 +1,47 @@
+name: Version Check
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        required: true
+        type: string
+
+jobs:
+  check_version:
+
+    runs-on: ${{ vars.ORG_DEFAULT_RUNNER_OS }}
+    
+    steps:
+      - name: Checkout compare
+        uses: actions/checkout@v3
+        with:
+          path: source
+
+      - name: Checkout base
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+          path: destination
+
+      - name: Checkout utils for version_check.py
+        uses: actions/checkout@v3
+        with:
+          repository: televate-au/utils
+          token: ${{ secrets.CICD_PAT }}
+          path: utils
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Create requirements.txt for cache
+        run: echo "packaging" > requirements.txt
+
+      - name: Install Packaging
+        run: pip install -r requirements.txt
+
+      - name: Check version is incremented
+        run: python utils/version_check.py source/${{ inputs.path }} destination/${{ inputs.path }}

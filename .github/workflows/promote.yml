@@ -1,0 +1,68 @@
+name: promote
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        default: ap-southeast-2
+        required: false
+        type: string
+      branch-sha:
+        required: false
+        type: string
+      image-name:
+        required: true
+        type: string
+      role-to-assume:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+# TODO - fix this to update tag even if there's no promotion
+
+jobs:
+  promote:
+    permissions:
+      contents: read  # This is required for actions/checkout
+      id-token: write  # This is required for requesting the JWT
+
+    runs-on: ${{ vars.ORG_DEFAULT_RUNNER_OS }}
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ inputs.aws-region }}
+          role-to-assume: ${{ inputs.role-to-assume }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Promote
+        run: |
+          docker pull ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image-name }}_nonprod:${{ inputs.version }}-${{ inputs.branch-sha }}
+          
+          docker tag ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image-name }}_nonprod:${{ inputs.version }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image-name }}_prod:${{ inputs.version }}
+          docker tag ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image-name }}_nonprod:${{ inputs.version }} \
+            ghcr.io/televate-au/${{ inputs.image-name }}:${{ inputs.version }}:${{ inputs.version }}
+
+          docker rmi ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image-name }}_nonprod:${{ inputs.version }}-${{ inputs.branch-sha }}
+
+          docker push -a ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image-name }}_prod:${{ inputs.version }}
+
+      - name: Tag repository
+        uses: rickstaa/action-create-tag@v1
+        with:
+          tag: ${{ inputs.version }}
+

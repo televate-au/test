@@ -1,0 +1,83 @@
+name: Data
+
+on:
+  workflow_call:
+    inputs:
+      workload-name:
+        required: true
+        type: string
+
+    outputs:
+      branch_sha:
+        description: "The sha256sum of the branch name"
+        value: ${{ jobs.data.outputs.branch_sha }}
+      py_changes:
+        description: "The count of changed Python files"
+        value: ${{ jobs.data.outputs.py_changes }}
+      tf_changes:
+        description: "The count of changed Terraform files"
+        value: ${{ jobs.data.outputs.tf_changes }}
+      version:
+        description: "The sematic version of the workload"
+        value: ${{ jobs.data.outputs.version }}
+
+permissions:
+  contents: read  # This is required for actions/checkout
+
+jobs:
+  data:
+    runs-on: ${{ vars.ORG_DEFAULT_RUNNER_OS }}
+    outputs:
+      branch_sha: ${{ steps.branch_sha.outputs.branch_sha }}
+      py_changes: ${{ steps.python.outputs.py_changes }}
+      tf_changes: ${{ steps.iac.outputs.tf_changes }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Check for python changes
+        id: python
+        # Workflows run with -e
+        # This causes the run to terminate immediately when any pipeline exits with a non-zero status.
+        # grep returns a 1 when it doesn't find any match, and thus, terminates immediately.
+        # We instead run an OR on the grep command, and exit on anything greater than 1 so we don't
+        # clobber other error codes.
+        run: |
+          result=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.sha }} --name-only | grep -E -c '\.py|tox\.ini' || exit_code=$?)
+          if (( exit_code > 1 )) ; then
+              exit $exit_code
+          fi
+
+          echo "py_changes=$result" >> $GITHUB_OUTPUT
+
+
+      - name: Check for terraform changes
+        id: iac
+        run: |
+          result=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.sha }} --name-only | grep -E -c '\.tf|\.hcl|\.tfvars' || exit_code=$?)
+          if (( exit_code > 1 )) ; then
+              exit $exit_code
+          fi
+
+          echo "tf_changes=$result" >> $GITHUB_OUTPUT
+
+      - name: Set branch_sha
+        id: branch_sha
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: |
+          branch_sha=$(echo -n "$BRANCH_NAME" | sha256sum | head -c 7)
+
+          echo "branch_sha=$branch_sha"
+          echo "branch_sha=$branch_sha" >> $GITHUB_OUTPUT
+
+      - name: Set version
+        id: version
+        run: |
+          version=$(cat src/${{ inputs.workload-name }}/__version__.py | cut -d '"' -f 2)
+          
+          echo "version=$version"
+          echo "version=$version" >> $GITHUB_OUTPUT

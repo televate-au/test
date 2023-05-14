@@ -1,0 +1,130 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      auto-apply:
+        default: true
+        required: false
+        type: boolean
+      aws-region:
+        default: ap-southeast-2
+        required: false
+        type: string
+      environment:
+        required: true
+        type: string
+      role-to-assume:
+        required: true
+        type: string
+      version_tag:
+        required: true
+        type: string
+
+    secrets:
+      CICD_PAT:
+        required: true
+      
+
+defaults:
+  run:
+    working-directory: ./terraform
+
+env:
+  TF_IN_AUTOMATION: 1
+  TF_INPUT: 0
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+  pull-requests: write # This is required for updating PRs with the plan
+
+jobs:
+  deploy_dev:
+    runs-on: ${{ vars.ORG_DEFAULT_RUNNER_OS }}
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: hashicorp/setup-terraform@v2
+
+      - name: Allow pulling private modules
+        run: git config --global url."https://${{ secrets.CICD_PAT }}@github".insteadOf ssh://git@github
+
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ inputs.aws-region }}
+          role-to-assume: ${{ inputs.role-to-assume }}
+
+      - name: Terraform Init
+        id: init
+        # don't add -upgrade. Has to be done on local to prevent lockfile conflicts
+        run: terraform init -backend-config backends/${{ inputs.environment }}.hcl
+
+      - name: Terraform Plan (no color)
+        id: plan
+        run: terraform plan -no-color -var-file vars/${{ inputs.environment }}.tfvars --var "version_tag=${{ inputs.version_tag }}" -out=tfplan
+        continue-on-error: true
+
+      - name: Terraform Plan (color)
+        run: terraform show tfplan
+
+      - name: Update pull request with output
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // 1. Retrieve existing bot comments for the PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            })
+            const botComment = comments.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('Terraform Plan 📖') && comment.body.includes('Environment: \`${{ inputs.environment }}\`')
+            })
+
+            // 2. Prepare format of the comment
+            const output = `#### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pusher: ${{ github.actor }}, Action: \`${{ github.event_name }}\`, Environment: \`${{ inputs.environment }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            // 3. If we have a comment, update it, otherwise create a new one
+            if (botComment) {
+              github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: output
+              })
+            } else {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: output
+              })
+            }
+
+      - name: Fail job if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform Apply
+        if: inputs.auto-apply
+        id: apply
+        run: terraform apply tfplan
